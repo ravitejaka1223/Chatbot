@@ -5,6 +5,7 @@ import random
 import html
 import os
 from dotenv import load_dotenv
+import google.generativeai as genai  # Import Google's Generative AI library
 
 # Load environment variables from .env file
 load_dotenv()
@@ -157,6 +158,38 @@ def add_rain_theme():
         border: 1px solid #234976;
     }
     
+    /* Model selection tabs */
+    .model-selector {
+        display: flex;
+        margin-bottom: 15px;
+    }
+    
+    .model-tab {
+        flex: 1;
+        text-align: center;
+        padding: 10px;
+        cursor: pointer;
+        border: 1px solid #234976;
+        background-color: rgba(13, 33, 63, 0.5);
+        color: rgba(255, 255, 255, 0.7);
+        transition: all 0.3s ease;
+    }
+    
+    .model-tab.active {
+        background-color: rgba(0, 195, 255, 0.2);
+        color: #00c3ff;
+        border-color: #00c3ff;
+        font-weight: bold;
+    }
+    
+    .model-tab:first-child {
+        border-radius: 8px 0 0 8px;
+    }
+    
+    .model-tab:last-child {
+        border-radius: 0 8px 8px 0;
+    }
+    
     /* Scrollbar */
     ::-webkit-scrollbar {
         width: 8px;
@@ -272,28 +305,35 @@ def add_rain_theme():
 
 add_rain_theme()
 
-# Get API key from environment variable or .env file
-api_key = os.getenv("OPENAI_API_KEY", "")
+# Get API keys from environment variables or .env file
+openai_api_key = os.getenv("OPENAI_API_KEY", "")
+gemini_api_key = os.getenv("GEMINI_API_KEY", "")
 
-# Initialize chat history and user input state
+# Initialize session state variables
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 
-# Add a form submission key
+if 'selected_model' not in st.session_state:
+    st.session_state.selected_model = "openai"  # Default model
+
 if 'form_submit' not in st.session_state:
     st.session_state.form_submit = False
 
-# Check if API key is set
-def is_api_key_set():
-    return api_key != ""
+# Check if API keys are set
+def is_openai_key_set():
+    return st.session_state.get('temp_openai_key', openai_api_key) != ""
+
+def is_gemini_key_set():
+    return st.session_state.get('temp_gemini_key', gemini_api_key) != ""
 
 # Function to get current time
 def get_time():
     return time.strftime("%I:%M %p")
 
 # Function to generate response from OpenAI
-def get_chatbot_response(prompt):
+def get_openai_response(prompt):
     try:
+        api_key = st.session_state.get('temp_openai_key', openai_api_key)
         client = openai.OpenAI(api_key=api_key)
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
@@ -308,27 +348,100 @@ def get_chatbot_response(prompt):
     except Exception as e:
         return f"Error: {str(e)}"
 
+# Function to generate response from Gemini
+def get_gemini_response(prompt):
+    try:
+        api_key = st.session_state.get('temp_gemini_key', gemini_api_key)
+        
+        # Configure the Gemini API
+        genai.configure(api_key=api_key)
+        
+        # Create a GenerativeModel object
+        model = genai.GenerativeModel('gemini-pro')
+        
+        # Generate a response
+        response = model.generate_content(
+            contents=[
+                {"role": "user", "parts": [{"text": prompt}]}
+            ],
+            generation_config={
+                "temperature": 0.7,
+                "max_output_tokens": 150,
+            }
+        )
+        
+        # Extract the text from the response
+        return response.text
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+# General get response function that routes to the appropriate API
+def get_chatbot_response(prompt):
+    if st.session_state.selected_model == "openai":
+        return get_openai_response(prompt)
+    else:  # gemini
+        return get_gemini_response(prompt)
+
 # Sidebar for API key setup
 with st.sidebar:
     st.markdown('<div class="sidebar-content">', unsafe_allow_html=True)
     st.subheader("Setup")
     
-    if not is_api_key_set():
-        st.warning("⚠️ OpenAI API key not found!")
-        st.info("Option 1: Create a .env file with OPENAI_API_KEY=your_api_key")
-        st.info("Option 2: Enter your API key below (temporary, not saved):")
-        temp_api_key = st.text_input("API Key:", type="password")
-        if temp_api_key:
-            api_key = temp_api_key
-            st.success("✅ API Key set for this session")
-    else:
-        st.success("✅ API Key configured")
+    # Model selection
+    st.write("Select AI Model:")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("OpenAI", key="select_openai", 
+                    use_container_width=True,
+                    type="primary" if st.session_state.selected_model == "openai" else "secondary"):
+            st.session_state.selected_model = "openai"
+            st.rerun()
+    
+    with col2:
+        if st.button("Gemini", key="select_gemini", 
+                    use_container_width=True,
+                    type="primary" if st.session_state.selected_model == "gemini" else "secondary"):
+            st.session_state.selected_model = "gemini"
+            st.rerun()
+    
+    st.divider()
+    
+    # API Key inputs based on selected model
+    if st.session_state.selected_model == "openai":
+        st.subheader("OpenAI API Setup")
+        if not is_openai_key_set():
+            st.warning("⚠️ OpenAI API key not found!")
+            st.info("Option 1: Create a .env file with OPENAI_API_KEY=your_api_key")
+            st.info("Option 2: Enter your API key below (temporary, not saved):")
+            temp_api_key = st.text_input("OpenAI API Key:", type="password", key="openai_key_input")
+            if temp_api_key:
+                st.session_state.temp_openai_key = temp_api_key
+                st.success("✅ OpenAI API Key set for this session")
+        else:
+            st.success("✅ OpenAI API Key configured")
+    else:  # gemini
+        st.subheader("Gemini API Setup")
+        if not is_gemini_key_set():
+            st.warning("⚠️ Gemini API key not found!")
+            st.info("Option 1: Create a .env file with GEMINI_API_KEY=your_api_key")
+            st.info("Option 2: Enter your API key below (temporary, not saved):")
+            temp_api_key = st.text_input("Gemini API Key:", type="password", key="gemini_key_input")
+            if temp_api_key:
+                st.session_state.temp_gemini_key = temp_api_key
+                st.success("✅ Gemini API Key set for this session")
+        else:
+            st.success("✅ Gemini API Key configured")
     
     st.divider()
     st.subheader("About")
-    st.markdown("RainChat uses OpenAI's GPT model to provide helpful responses.")
-    st.markdown("All responses are limited to 100 words or less.")
+    st.markdown(f"RainChat uses {'OpenAI GPT-3.5' if st.session_state.selected_model == 'openai' else 'Google Gemini'} to provide helpful responses.")
+    st.markdown("All responses are limited to around 100 words or less.")
     st.markdown("</div>", unsafe_allow_html=True)
+
+# Display model badge on the main interface
+model_badge = "OpenAI GPT-3.5" if st.session_state.selected_model == "openai" else "Google Gemini"
+st.caption(f"Using: {model_badge}")
 
 # Main chat interface
 st.markdown('<div class="chat-container">', unsafe_allow_html=True)
@@ -355,16 +468,23 @@ st.markdown('</div>', unsafe_allow_html=True)
 # Chat input area
 st.markdown('<div class="chat-input-area">', unsafe_allow_html=True)
 
-# Using a form for message submission - this is the key fix
+# Check if the currently selected API key is set
+api_ready = (is_openai_key_set() if st.session_state.selected_model == "openai" else is_gemini_key_set())
+
+# Using a form for message submission
 with st.form(key="chat_form"):
     user_input = st.text_input("", placeholder="Type your message here...")
     col1, col2 = st.columns([5, 1])
     
     with col2:
-        submit_button = st.form_submit_button("Send")
+        submit_button = st.form_submit_button("Send", disabled=not api_ready)
+
+# Display warning if API key is not set
+if not api_ready:
+    st.warning(f"⚠️ Please enter your {'OpenAI' if st.session_state.selected_model == 'openai' else 'Gemini'} API key in the sidebar to start chatting.")
 
 # Process the form submission
-if submit_button and user_input and is_api_key_set():
+if submit_button and user_input and api_ready:
     # Add user message to chat history
     st.session_state.chat_history.append({
         "role": "user", 
@@ -372,7 +492,7 @@ if submit_button and user_input and is_api_key_set():
         "time": get_time()
     })
     
-    # Get response from OpenAI
+    # Get response from selected AI model
     with st.spinner("Thinking..."):
         response = get_chatbot_response(user_input)
     
@@ -396,10 +516,11 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 # Instructions for deployment
 if not st.session_state.chat_history:
-    st.markdown("""
+    st.markdown(f"""
     <div style="margin-top: 30px; text-align: center; color: rgba(255,255,255,0.6);">
         <h4>👋 Welcome to RainChat!</h4>
-        <p>Type a message above to start chatting with the AI assistant.</p>
+        <p>Type a message above to start chatting with the {model_badge} assistant.</p>
+        <p>You can switch between OpenAI and Gemini in the sidebar.</p>
     </div>
     """, unsafe_allow_html=True)
 
